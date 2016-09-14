@@ -11,21 +11,23 @@ module Devise
         attr_accessor :password_confirmation
       end
 
-      def update_with_password(params={})
-        params.delete(:current_password)
-        self.update_without_password(params)
-      end	
+      def after_saml_authentication(session_index)
+        if Devise.saml_session_index_key && self.respond_to?(Devise.saml_session_index_key)
+          self.update_attribute(Devise.saml_session_index_key, session_index)
+        end
+      end
 
-      def update_without_password(params={})
-        params.delete(:password)
-        params.delete(:password_confirmation)
-
-        result = update_attributes(params)
-        result
+      def authenticatable_salt
+        if Devise.saml_session_index_key &&
+           self.respond_to?(Devise.saml_session_index_key) &&
+           self.send(Devise.saml_session_index_key).present?
+          self.send(Devise.saml_session_index_key)
+        else
+          super
+        end
       end
 
       module ClassMethods
-        include DeviseSamlAuthenticatable::SamlConfig
         def authenticate_with_saml(saml_response)
           key = Devise.saml_default_user_key
           attributes = saml_response.attributes
@@ -37,15 +39,19 @@ module Devise
             auth_value.try(:downcase!) if Devise.case_insensitive_keys.include?(key)
           end
           resource = where(key => auth_value).first
-          if (resource.nil? && !Devise.saml_create_user)
-            logger.info("User(#{auth_value}) not found.  Not configured to create the user.")
-            return nil 
+
+          if resource.nil?
+            if Devise.saml_create_user
+              logger.info("Creating user(#{auth_value}).")
+              resource = new
+            else
+              logger.info("User(#{auth_value}) not found.  Not configured to create the user.")
+              return nil
+            end
           end
 
-          if (resource.nil? && Devise.saml_create_user)
-            logger.info("Creating user(#{auth_value}).")
-            resource = new
-            set_user_saml_attributes(resource,attributes)
+          if Devise.saml_update_user || (resource.new_record? && Devise.saml_create_user)
+            set_user_saml_attributes(resource, attributes)
             if (Devise.saml_use_subject)
               resource.send "#{key}=", auth_value
             end
@@ -53,6 +59,11 @@ module Devise
           end
 
           resource
+        end
+
+        def reset_session_key_for(name_id)
+          resource = find_by(Devise.saml_default_user_key => name_id)
+          resource.update_attribute(Devise.saml_session_index_key, nil) unless resource.nil?
         end
 
         def find_for_shibb_authentication(conditions)
