@@ -28,7 +28,7 @@ module Devise
       end
 
       module ClassMethods
-        def authenticate_with_saml(saml_response)
+        def authenticate_with_saml(saml_response, relay_state)
           key = Devise.saml_default_user_key
           attributes = saml_response.attributes
           if (Devise.saml_use_subject)
@@ -36,8 +36,9 @@ module Devise
           else
             inv_attr = attribute_map.invert
             auth_value = attributes[inv_attr[key.to_s]]
-            auth_value.try(:downcase!) if Devise.case_insensitive_keys.include?(key)
           end
+          auth_value.try(:downcase!) if Devise.case_insensitive_keys.include?(key)
+
           resource = where(key => auth_value).first
 
           if resource.nil?

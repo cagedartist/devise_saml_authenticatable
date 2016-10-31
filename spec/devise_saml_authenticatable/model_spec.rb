@@ -58,12 +58,12 @@ describe Devise::Models::SamlAuthenticatable do
   it "looks up the user by the configured default user key" do
     user = Model.new(new_record: false)
     expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
-    expect(Model.authenticate_with_saml(response)).to eq(user)
+    expect(Model.authenticate_with_saml(response, nil)).to eq(user)
   end
 
   it "returns nil if it cannot find a user" do
     expect(Model).to receive(:where).with(email: 'user@example.com').and_return([])
-    expect(Model.authenticate_with_saml(response)).to be_nil
+    expect(Model.authenticate_with_saml(response, nil)).to be_nil
   end
 
   context "when configured to use the subject" do
@@ -77,12 +77,12 @@ describe Devise::Models::SamlAuthenticatable do
     it "looks up the user by the configured default user key" do
       user = Model.new(new_record: false)
       expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
-      expect(Model.authenticate_with_saml(response)).to eq(user)
+      expect(Model.authenticate_with_saml(response, nil)).to eq(user)
     end
 
     it "returns nil if it cannot find a user" do
       expect(Model).to receive(:where).with(email: 'user@example.com').and_return([])
-      expect(Model.authenticate_with_saml(response)).to be_nil
+      expect(Model.authenticate_with_saml(response, nil)).to be_nil
     end
 
     context "when configured to create a user and the user is not found" do
@@ -92,7 +92,7 @@ describe Devise::Models::SamlAuthenticatable do
 
       it "creates and returns a new user with the name identifier and given attributes" do
         expect(Model).to receive(:where).with(email: 'user@example.com').and_return([])
-        model = Model.authenticate_with_saml(response)
+        model = Model.authenticate_with_saml(response, nil)
         expect(model.email).to eq('user@example.com')
         expect(model.name).to  eq('A User')
         expect(model.saved).to be(true)
@@ -107,7 +107,7 @@ describe Devise::Models::SamlAuthenticatable do
       it "creates and returns a new user with the name identifier and given attributes" do
         user = Model.new(email: "old_mail@mail.com", name: "old name", new_record: false)
         expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
-        model = Model.authenticate_with_saml(response)
+        model = Model.authenticate_with_saml(response, nil)
         expect(model.email).to eq('user@example.com')
         expect(model.name).to  eq('A User')
         expect(model.saved).to be(true)
@@ -122,7 +122,7 @@ describe Devise::Models::SamlAuthenticatable do
 
     it "creates and returns a new user with the given attributes" do
       expect(Model).to receive(:where).with(email: 'user@example.com').and_return([])
-      model = Model.authenticate_with_saml(response)
+      model = Model.authenticate_with_saml(response, nil)
       expect(model.email).to eq('user@example.com')
       expect(model.name).to  eq('A User')
       expect(model.saved).to be(true)
@@ -136,29 +136,46 @@ describe Devise::Models::SamlAuthenticatable do
 
     it "returns nil if the user is not found" do
       expect(Model).to receive(:where).with(email: 'user@example.com').and_return([])
-      expect(Model.authenticate_with_saml(response)).to be_nil
+      expect(Model.authenticate_with_saml(response, nil)).to be_nil
     end
 
     it "updates the attributes if the user is found" do
       user = Model.new(email: "old_mail@mail.com", name: "old name", new_record: false)
       expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
-      model = Model.authenticate_with_saml(response)
+      model = Model.authenticate_with_saml(response, nil)
       expect(model.email).to eq('user@example.com')
       expect(model.name).to  eq('A User')
       expect(model.saved).to be(true)
     end
   end
 
-
   context "when configured with a case-insensitive key" do
-    before do
-      allow(Devise).to receive(:case_insensitive_keys).and_return([:email])
+    shared_examples "correct downcasing" do
+      before do
+        allow(Devise).to receive(:case_insensitive_keys).and_return([:email])
+      end
+
+      it "looks up the user with a downcased value" do
+        user = Model.new(new_record: false)
+        expect(Model).to receive(:where).with(email: 'upper@example.com').and_return([user])
+        expect(Model.authenticate_with_saml(response, nil)).to eq(user)
+      end
     end
 
-    it "looks up the user with a downcased value" do
-      user = Model.new(new_record: false)
-      expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
-      expect(Model.authenticate_with_saml(response)).to eq(user)
+    context "when configured to use the subject" do
+      let(:name_id) { 'UPPER@example.com' }
+
+      before do
+        allow(Devise).to receive(:saml_use_subject).and_return(true)
+      end
+
+      include_examples "correct downcasing"
+    end
+
+    context "when using default user key" do
+      let(:attributes) { OneLogin::RubySaml::Attributes.new('saml-email-format' => ['UPPER@example.com']) }
+
+      include_examples "correct downcasing"
     end
   end
 end
