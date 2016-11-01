@@ -47,11 +47,15 @@ class Devise::SamlSessionsController < Devise::SessionsController
     end
   end
 
-  # Override devise to send user to IdP logout for SLO
-  def after_sign_out_path_for(_)
-    request = OneLogin::RubySaml::Logoutrequest.new
-    request.create(saml_config)
-  end
+  # Optionally override devise to send user to IdP logout for SLO
+  # def after_sign_out_path_for(resource_or_scope)
+  #  if saml_config.idp_slo_target_url.present?
+  #   request = OneLogin::RubySaml::Logoutrequest.new
+  #   request.create(saml_config)
+  #  else
+  #    super(resource_or_scope)
+  #  end
+  # end
 
   def generate_idp_logout_response(saml_config, logout_request_id)
     OneLogin::RubySaml::SloLogoutresponse.new.create(saml_config, logout_request_id, nil)
