@@ -3,7 +3,11 @@ require "ruby-saml"
 class Devise::SamlSessionsController < Devise::SessionsController
   include DeviseSamlAuthenticatable::SamlConfig
   unloadable if Rails::VERSION::MAJOR < 4
-  skip_before_action :verify_authenticity_token, raise: false
+  if Rails::VERSION::MAJOR < 5
+    skip_before_filter :verify_authenticity_token
+  else
+    skip_before_action :verify_authenticity_token, raise: false
+  end
 
   def new
     idp_entity_id = get_idp_entity_id(params)
@@ -47,14 +51,12 @@ class Devise::SamlSessionsController < Devise::SessionsController
     end
   end
 
-  # Optionally override devise to send user to IdP logout for SLO
-  # def after_sign_out_path_for(resource_or_scope)
-  #  if saml_config.idp_slo_target_url.present?
+  # Override devise to send user to IdP logout for SLO
+  # CRUDELY DISABLED - BERKLEE HUB SHOULD NOT SEND SLO REQUEST
+  # def after_sign_out_path_for(_)
+  #   idp_entity_id = get_idp_entity_id(params)
   #   request = OneLogin::RubySaml::Logoutrequest.new
-  #   request.create(saml_config)
-  #  else
-  #    super(resource_or_scope)
-  #  end
+  #   request.create(saml_config(idp_entity_id))
   # end
 
   def generate_idp_logout_response(saml_config, logout_request_id)

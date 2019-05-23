@@ -39,13 +39,15 @@ describe Devise::Models::SamlAuthenticatable do
 
   before do
     allow(Rails).to receive(:root).and_return("/railsroot")
-    allow(File).to receive(:read).with("/railsroot/config/attribute-map.yml").and_return(<<-ATTRIBUTEMAP)
+    allow(File).to receive(:read).with("/railsroot/config/attribute-map.yml").and_return(attributemap)
+  end
+
+  let(:attributemap) {<<-ATTRIBUTEMAP
 ---
 "saml-email-format": email
 "saml-name-format":  name
       ATTRIBUTEMAP
-  end
-
+  }
   let(:response) { double(:response, attributes: attributes, name_id: name_id) }
   let(:attributes) {
     OneLogin::RubySaml::Attributes.new(
@@ -176,6 +178,193 @@ describe Devise::Models::SamlAuthenticatable do
       let(:attributes) { OneLogin::RubySaml::Attributes.new('saml-email-format' => ['UPPER@example.com']) }
 
       include_examples "correct downcasing"
+    end
+  end
+
+  context "when configured with a resource validator class" do
+    let(:validator_class) { double("validator") }
+    let(:validator) { double("validator") }
+    let(:user) { Model.new(new_record: false) }
+
+    before do
+      allow(Devise).to receive(:saml_resource_validator).and_return(validator_class)
+      allow(validator_class).to receive(:new).and_return(validator)
+    end
+
+    context "and sent a valid value" do
+      before do
+        allow(validator).to receive(:validate).with(user, response).and_return(true)
+      end
+
+      it "returns the user" do
+        expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
+        expect(Model.authenticate_with_saml(response, nil)).to eq(user)
+      end
+    end
+
+    context "and sent an invalid value" do
+      before do
+        allow(validator).to receive(:validate).with(user, response).and_return(false)
+      end
+
+      it "returns nil" do
+        expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
+        expect(Model.authenticate_with_saml(response, nil)).to be_nil
+      end
+    end
+  end
+
+
+  context "when configured with a resource validator hook" do
+    let(:validator_hook) { double("validator_hook") }
+    let(:decorated_response) { ::SamlAuthenticatable::SamlResponse.new(response, YAML.load(attributemap)) }
+    let(:user) { Model.new(new_record: false) }
+
+    before do
+      allow(Devise).to receive(:saml_resource_validator_hook).and_return(validator_hook)
+      allow(::SamlAuthenticatable::SamlResponse).to receive(:new).with(response, YAML.load(attributemap)).and_return(decorated_response)
+    end
+
+    context "and sent a valid value" do
+      before do
+        expect(validator_hook).to receive(:call).with(user, decorated_response, 'user@example.com').and_return(true)
+      end
+
+      it "returns the user" do
+        expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
+        expect(Model.authenticate_with_saml(response, nil)).to eq(user)
+      end
+    end
+
+    context "and sent an invalid value" do
+      before do
+        expect(validator_hook).to receive(:call).with(user, decorated_response, 'user@example.com').and_return(false)
+      end
+
+      it "returns nil" do
+        expect(Model).to receive(:where).with(email: 'user@example.com').and_return([user])
+        expect(Model.authenticate_with_saml(response, nil)).to be_nil
+      end
+    end
+  end
+
+
+  context "when configured to use a custom update hook" do
+    it "can replicate the default behaviour in a custom hook" do
+      configure_hook do |user, saml_response|
+        Devise.saml_default_update_resource_hook.call(user, saml_response)
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    it "can extend the default behaviour with custom transformations" do
+      configure_hook do |user, saml_response|
+        Devise.saml_default_update_resource_hook.call(user, saml_response)
+
+        user.email = "ext+#{user.email}"
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq("ext+#{attributes['saml-email-format']}")
+    end
+
+    it "can extend the default behaviour using information from the saml response" do
+      configure_hook do |user, saml_response|
+        Devise.saml_default_update_resource_hook.call(user, saml_response)
+
+        name_id = saml_response.raw_response.name_id
+        user.name += "@#{name_id}"
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user.name).to eq("#{attributes['saml-name-format']}@#{response.name_id}")
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    def configure_hook(&block)
+      allow(Model).to receive(:where).with(email: 'user@example.com').and_return([])
+      allow(Devise).to receive(:saml_default_user_key).and_return(:email)
+      allow(Devise).to receive(:saml_create_user).and_return(true)
+      allow(Devise).to receive(:saml_update_resource_hook).and_return(block)
+    end
+  end
+
+  context "when configured to use a custom user locator" do
+    let(:name_id) { 'SomeUsername' }
+
+    it "can replicate the default behaviour for a new user in a custom locator" do
+      allow(Model).to receive(:where).with(email: attributes['saml-email-format']).and_return([])
+
+      configure_hook do |model, saml_response, auth_value|
+        Devise.saml_default_resource_locator.call(model, saml_response, auth_value)
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    it "can replicate the default behaviour for an existing user in a custom locator" do
+      user = Model.new(email: attributes['saml-email-format'], name: attributes['saml-name-format'])
+      user.save!
+
+      allow(Model).to receive(:where).with(email: attributes['saml-email-format']).and_return([user])
+
+      configure_hook do |model, saml_response, auth_value|
+        Devise.saml_default_resource_locator.call(model, saml_response, auth_value)
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user).to eq(user)
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    it "can change the default behaviour for a new user from the saml response" do
+      allow(Model).to receive(:where).with(foo: attributes['saml-email-format'], bar: name_id).and_return([])
+
+      configure_hook do |model, saml_response, auth_value|
+        name_id = saml_response.raw_response.name_id
+        model.where(foo: auth_value, bar: name_id).first
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    it "can change the default behaviour for an existing user from the saml response" do
+      user = Model.new(email: attributes['saml-email-format'], name: attributes['saml-name-format'])
+      user.save!
+
+      allow(Model).to receive(:where).with(foo: attributes['saml-email-format'], bar: name_id).and_return([user])
+
+      configure_hook do |model, saml_response, auth_value|
+        name_id = saml_response.raw_response.name_id
+        model.where(foo: auth_value, bar: name_id).first
+      end
+
+      new_user = Model.authenticate_with_saml(response, nil)
+
+      expect(new_user).to eq(user)
+      expect(new_user.name).to eq(attributes['saml-name-format'])
+      expect(new_user.email).to eq(attributes['saml-email-format'])
+    end
+
+    def configure_hook(&block)
+      allow(Devise).to receive(:saml_default_user_key).and_return(:email)
+      allow(Devise).to receive(:saml_create_user).and_return(true)
+      allow(Devise).to receive(:saml_resource_locator).and_return(block)
     end
   end
 end

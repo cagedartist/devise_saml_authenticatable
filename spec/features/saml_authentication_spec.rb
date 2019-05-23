@@ -5,6 +5,7 @@ require 'uri'
 require 'capybara/rspec'
 require 'capybara/poltergeist'
 Capybara.default_driver = :poltergeist
+Capybara.server = :webrick
 
 describe "SAML Authentication", type: :feature do
   let(:idp_port) { 8009 }
@@ -138,7 +139,6 @@ describe "SAML Authentication", type: :feature do
   end
 
   context "when the idp_settings_adapter key is set" do
-
     before(:each) do
       create_app('idp', 'INCLUDE_SUBJECT_IN_ATTRIBUTES' => "false")
       create_app('sp', 'USE_SUBJECT_TO_AUTHENTICATE' => "true", 'IDP_SETTINGS_ADAPTER' => "IdpSettingsAdapter", 'IDP_ENTITY_ID_READER' => "OurEntityIdReader")
@@ -156,7 +156,24 @@ describe "SAML Authentication", type: :feature do
       create_user("you@example.com")
 
       visit 'http://localhost:8020/users/saml/sign_in/?entity_id=http%3A%2F%2Flocalhost%3A8020%2Fsaml%2Fmetadata'
-      expect(current_url).to match(%r(\Ahttp://www.example.com/\?SAMLRequest=))
+      expect(current_url).to match(%r(\Ahttp://www.example.com/sso\?SAMLRequest=))
+    end
+
+    it "logs a user out of the IdP via the SP" do
+      sign_in
+
+      # prove user is still signed in
+      visit 'http://localhost:8020/'
+      expect(page).to have_content("you@example.com")
+      expect(current_url).to eq("http://localhost:8020/")
+
+      click_on "Log out"
+      #confirm the logout response redirected to the SP which in turn attempted to sign th e
+      expect(current_url).to match(%r(\Ahttp://www.example.com/slo\?SAMLRequest=))
+
+      # prove user is now signed out
+      visit 'http://localhost:8020/users/saml/sign_in/?entity_id=http%3A%2F%2Flocalhost%3A8020%2Fsaml%2Fmetadata'
+      expect(current_url).to match(%r(\Ahttp://www.example.com/sso\?SAMLRequest=))
     end
   end
 
@@ -187,7 +204,7 @@ describe "SAML Authentication", type: :feature do
         fill_in "Email", with: "you@example.com"
         fill_in "Password", with: "asdf"
         click_on "Sign in"
-        expect(page).to have_content("Example Domain This domain is established to be used for illustrative examples in documents. You may use this domain in examples without prior coordination or asking for permission.")
+        expect(page).to have_content(:all, "Example Domain This domain is established to be used for illustrative examples in documents. You may use this domain in examples without prior coordination or asking for permission.")
         expect(current_url).to eq("http://www.example.com/")
       end
     end
@@ -204,7 +221,7 @@ describe "SAML Authentication", type: :feature do
     fill_in "Email", with: "you@example.com"
     fill_in "Password", with: "asdf"
     click_on "Sign in"
-    Timeout.timeout(Capybara.default_wait_time) do
+    Timeout.timeout(Capybara.default_max_wait_time) do
       loop do
         sleep 0.1
         break if current_url == "http://localhost:8020/"

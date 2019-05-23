@@ -8,6 +8,10 @@ idp_settings_adapter = ENV.fetch('IDP_SETTINGS_ADAPTER', "nil")
 idp_entity_id_reader = ENV.fetch('IDP_ENTITY_ID_READER', "DeviseSamlAuthenticatable::DefaultIdpEntityIdReader")
 saml_failed_callback = ENV.fetch('SAML_FAILED_CALLBACK', "nil")
 
+if Rails::VERSION::MAJOR < 5 || (Rails::VERSION::MAJOR == 5 && Rails::VERSION::MINOR < 2)
+  gsub_file 'config/secrets.yml', /secret_key_base:.*$/, 'secret_key_base: "8b5889df1fcf03f76c7d66da02d8776bcc85b06bed7d9c592f076d9c8a5455ee6d4beae45986c3c030b40208db5e612f2a6ef8283036a352e3fae83c5eda36be"'
+end
+
 gem 'devise_saml_authenticatable', path: '../../..'
 gem 'ruby-saml', OneLogin::RubySaml::VERSION
 gem 'thin'
@@ -17,9 +21,12 @@ insert_into_file('Gemfile', after: /\z/) {
 # Lock down versions of gems for older versions of Ruby
 if Gem::Version.new(RUBY_VERSION.dup) < Gem::Version.new("2.1")
   gem 'devise', '~> 3.5'
+  gem 'nokogiri', '~> 1.6.8'
 end
   GEMFILE
 }
+# sqlite3 is hard-coded in Rails to v1.3.x
+gsub_file 'Gemfile', /^gem 'sqlite3'.*$/, "gem 'sqlite3', '~> 1.3.6'"
 
 template File.expand_path('../idp_settings_adapter.rb.erb', __FILE__), 'app/lib/idp_settings_adapter.rb'
 
@@ -65,7 +72,7 @@ after_bundle do
   insert_into_file('app/views/home/index.html.erb', after: /\z/) {
     <<-HOME
 <%= current_user.email %> <%= current_user.name %>
-<%= form_tag destroy_user_session_path, method: :delete do %>
+<%= form_tag destroy_user_session_path(entity_id: "http://localhost:8020/saml/metadata"), method: :delete do %>
   <%= submit_tag "Log out" %>
 <% end %>
     HOME
@@ -75,6 +82,8 @@ after_bundle do
   # Configure for our SAML IdP
   generate 'devise:install'
   gsub_file 'config/initializers/devise.rb', /^end$/, <<-CONFIG
+  config.secret_key = 'adc7cd73792f5d20055a0ac749ce8cdddb2e0f0d3ea7fe7855eec3d0f81833b9a4ac31d12e05f232d40ae86ca492826a6fc5a65228c6e16752815316e2d5b38d'
+
   config.saml_default_user_key = :email
   config.saml_session_index_key = #{saml_session_index_key}
 
@@ -103,13 +112,15 @@ class UsersController < ApplicationController
   skip_before_action :verify_authenticity_token
   def create
     User.create!(email: params[:email])
-    render nothing: true, status: 201
+    head 201
   end
 end
   USERS
 
   rake "db:create"
   rake "db:migrate"
+  rake "db:create", env: "production"
+  rake "db:migrate", env: "production"
 end
 
 create_file 'public/stylesheets/application.css', ''

@@ -7,6 +7,7 @@ Gem::Specification.new do |gem|
   gem.description   = %q{SAML Authentication for devise}
   gem.summary       = %q{SAML Authentication for devise }
   gem.homepage      = ""
+  gem.license     = "MIT"
 
   gem.files         = `git ls-files`.split($\)
   gem.executables   = gem.files.grep(%r{^bin/}).map{ |f| File.basename(f) }
@@ -17,5 +18,5 @@ Gem::Specification.new do |gem|
   gem.test_files    = gem.files.grep(%r{^(test|spec|features)/})
 
   gem.add_dependency("devise","> 2.0.0")
-  gem.add_dependency("ruby-saml","~> 1.3")
+  gem.add_dependency("ruby-saml","~> 1.7")
 end
