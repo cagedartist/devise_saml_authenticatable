@@ -29,6 +29,14 @@ module Devise
       end
 
       module ClassMethods
+        def saml_resource_validator
+          if Devise.saml_resource_validator.respond_to?(:new)
+            Devise.saml_resource_validator
+          else
+            Devise.saml_resource_validator.constantize
+          end
+        end
+
         def authenticate_with_saml(saml_response, relay_state)
           key = Devise.saml_default_user_key
           decorated_response = ::SamlAuthenticatable::SamlResponse.new(
@@ -46,7 +54,7 @@ module Devise
 
           raise "Only one validator configuration can be used at a time" if Devise.saml_resource_validator && Devise.saml_resource_validator_hook
           if Devise.saml_resource_validator || Devise.saml_resource_validator_hook
-            valid = if Devise.saml_resource_validator then Devise.saml_resource_validator.new.validate(resource, saml_response)
+            valid = if Devise.saml_resource_validator then saml_resource_validator.new.validate(resource, saml_response)
                     else Devise.saml_resource_validator_hook.call(resource, decorated_response, auth_value)
                     end
             if !valid
