@@ -51,10 +51,18 @@ module Devise
         end
       end
 
+      def saml_failed_callback
+        if Devise.saml_failed_callback.respond_to?(:new)
+          Devise.saml_failed_callback
+        else
+          Devise.saml_failed_callback.constantize
+        end
+      end
+
       def failed_auth(msg)
         DeviseSamlAuthenticatable::Logger.send(msg)
         fail!(:invalid)
-        Devise.saml_failed_callback.new.handle(@response, self) if Devise.saml_failed_callback
+        saml_failed_callback.new.handle(@response, self) if Devise.saml_failed_callback
       end
 
     end
